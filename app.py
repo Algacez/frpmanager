@@ -399,8 +399,9 @@ def create_file() -> Any:
     if Path(name).name != name:
         flash("文件名无效", "error")
         return redirect(url_for("index"))
-    if not name.lower().endswith(".toml"):
-        name = f"{name}.toml"
+    if name.lower().endswith(".toml"):
+        name = name[:-5]
+    name = f"{name}.toml"
     file_path = (directory / name).resolve()
     if file_path.exists():
         flash("文件已存在", "error")
@@ -590,7 +591,21 @@ def frps_restart() -> Any:
 def frpc_add() -> Any:
     settings = load_settings()
     instance_id = request.form.get("instance_id", "").strip()
-    config_path = request.form.get("config_path", "").strip()
+    config_dir = request.form.get("config_dir", "").strip()
+    config_name = request.form.get("config_name", "").strip()
+    config_path = ""
+    if config_dir or config_name:
+        base = safe_dir(config_dir) if config_dir else current_dir(settings)
+        if base is None:
+            flash("配置目录无效", "error")
+            return redirect(url_for("service_page"))
+        if not config_name:
+            flash("请选择配置文件", "error")
+            return redirect(url_for("service_page"))
+        name = config_name
+        if name.lower().endswith(".toml"):
+            name = name[:-5]
+        config_path = str((base / f"{name}.toml").resolve())
     if not instance_id:
         if not config_path:
             flash("请至少填写实例名或选择配置文件", "error")
@@ -638,12 +653,23 @@ def frpc_remove() -> Any:
 def frpc_set_config() -> Any:
     settings = load_settings()
     instance_id = request.form.get("instance_id", "").strip()
-    config_path = request.form.get("config_path", "").strip()
+    config_dir = request.form.get("config_dir", "").strip()
+    config_name = request.form.get("config_name", "").strip()
     instance = _find_instance(settings, instance_id)
     if not instance:
         abort(404)
-    if config_path:
-        cfg = Path(config_path).expanduser().resolve()
+    if config_dir or config_name:
+        base = safe_dir(config_dir) if config_dir else current_dir(settings)
+        if base is None:
+            flash("配置目录无效", "error")
+            return redirect(url_for("service_page"))
+        if not config_name:
+            flash("请选择配置文件", "error")
+            return redirect(url_for("service_page"))
+        name = config_name
+        if name.lower().endswith(".toml"):
+            name = name[:-5]
+        cfg = (base / f"{name}.toml").resolve()
         if not cfg.exists():
             flash("配置文件不存在", "error")
             return redirect(url_for("service_page"))

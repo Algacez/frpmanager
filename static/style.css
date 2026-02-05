@@ -47,6 +47,7 @@ h2 { margin: 0 0 10px; font-size: 20px; }
 h3 { margin: 0; font-size: 18px; }
 
 .sub { margin: 0; color: var(--muted); }
+.muted { color: var(--muted); }
 
 .card {
   background: var(--card);

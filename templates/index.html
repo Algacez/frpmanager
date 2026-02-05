@@ -72,7 +72,7 @@
       <div class="row between">
         <h2>配置文件</h2>
         <form method="post" action="/create-file" class="inline">
-          <input type="text" name="new_file" placeholder="新建 config.toml" />
+          <input type="text" name="new_file" placeholder="新建文件名（无需 .toml）" />
           <button type="submit">新建</button>
         </form>
       </div>
@@ -101,6 +101,7 @@
       <div class="divider"></div>
       <div class="row wrap">
         {% if states.frpc_instances %}
+          <div class="muted">frpc 实例: {{ states.frpc_instances | map(attribute='id') | join(', ') }}</div>
           {% for inst in states.frpc_instances %}
             <div class="pill">
               <strong>{{ inst.id }}</strong>
