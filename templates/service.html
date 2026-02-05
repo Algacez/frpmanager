@@ -6,8 +6,15 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  <div class="bg-orb"></div>
   <div class="container">
-    <h1>FRP 服务管理</h1>
+    <header class="hero">
+      <div>
+        <h1>FRP 服务管理</h1>
+        <p class="sub">管理 frps 与多个 frpc 实例，配置更新后自动重启。</p>
+      </div>
+      <a class="btn" href="{{ url_for('index') }}">返回列表</a>
+    </header>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -19,12 +26,7 @@
       {% endif %}
     {% endwith %}
 
-    <div class="row">
-      <a class="btn" href="{{ url_for('index') }}">返回</a>
-      <div class="path">当前目录: {{ directory }}</div>
-    </div>
-
-    <section>
+    <section class="card">
       <h2>程序路径</h2>
       <form method="post" action="/service/update" class="stack">
         <label>frpc 路径</label>
@@ -35,43 +37,88 @@
       </form>
     </section>
 
-    <section>
-      <h2>服务配置</h2>
+    <section class="card">
+      <h2>frps 服务</h2>
+      <div class="row wrap">
+        <div>状态: {{ '运行中' if states.frps.running else '未运行' }}</div>
+        <div>守护: {{ '是' if states.frps.desired else '否' }}</div>
+        <div>配置: {{ states.frps.config or '未设置' }}</div>
+      </div>
+      {% if states.frps.error %}
+        <div class="error">{{ states.frps.error }}</div>
+      {% endif %}
+      <div class="row">
+        <form method="post" action="/service/frps/set-config" class="inline">
+          <input type="text" name="config_path" placeholder="/path/to/frps.toml" list="toml-files" />
+          <button type="submit">设置配置</button>
+        </form>
+      </div>
+      <div class="row">
+        <form method="post" action="/service/frps/start" class="inline">
+          <button type="submit">启动/守护</button>
+        </form>
+        <form method="post" action="/service/frps/restart" class="inline">
+          <button type="submit">重启</button>
+        </form>
+        <form method="post" action="/service/frps/stop" class="inline">
+          <button type="submit" class="danger">停止</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row between">
+        <h2>frpc 实例</h2>
+        <form method="post" action="/service/frpc/add" class="inline">
+          <input type="text" name="instance_id" placeholder="实例名，如 office" />
+          <input type="text" name="config_path" placeholder="/path/to/frpc.toml" list="toml-files" />
+          <button type="submit">添加实例</button>
+        </form>
+      </div>
       <div class="grid">
-        {% for name in ['frpc','frps'] %}
-          <div class="card">
-            <h3>{{ name }}</h3>
-            <div>状态: {{ '运行中' if states[name].running else '未运行' }}</div>
-            <div>守护: {{ '是' if states[name].desired else '否' }}</div>
-            <div>配置: {{ states[name].config or '未设置' }}</div>
-            {% if states[name].error %}
-              <div class="error">{{ states[name].error }}</div>
+        {% for inst in states.frpc_instances %}
+          <div class="card inner">
+            <div class="row between">
+              <h3>{{ inst.id }}</h3>
+              <form method="post" action="/service/frpc/remove" class="inline">
+                <input type="hidden" name="instance_id" value="{{ inst.id }}" />
+                <button type="submit" class="danger">移除</button>
+              </form>
+            </div>
+            <div>状态: {{ '运行中' if inst.running else '未运行' }}</div>
+            <div>守护: {{ '是' if inst.desired else '否' }}</div>
+            <div>配置: {{ inst.config or '未设置' }}</div>
+            {% if inst.error %}
+              <div class="error">{{ inst.error }}</div>
             {% endif %}
-            <form method="post" action="/service/set-config" class="stack">
-              <input type="hidden" name="name" value="{{ name }}" />
-              <input type="text" name="config_path" placeholder="/path/to/config.toml" />
+            <form method="post" action="/service/frpc/set-config" class="stack">
+              <input type="hidden" name="instance_id" value="{{ inst.id }}" />
+              <input type="text" name="config_path" placeholder="/path/to/frpc.toml" list="toml-files" />
               <button type="submit">设置配置</button>
             </form>
             <div class="row">
-              <form method="post" action="/service/start" class="inline">
-                <input type="hidden" name="name" value="{{ name }}" />
+              <form method="post" action="/service/frpc/start" class="inline">
+                <input type="hidden" name="instance_id" value="{{ inst.id }}" />
                 <button type="submit">启动/守护</button>
               </form>
-              <form method="post" action="/service/restart" class="inline">
-                <input type="hidden" name="name" value="{{ name }}" />
+              <form method="post" action="/service/frpc/restart" class="inline">
+                <input type="hidden" name="instance_id" value="{{ inst.id }}" />
                 <button type="submit">重启</button>
               </form>
-              <form method="post" action="/service/stop" class="inline">
-                <input type="hidden" name="name" value="{{ name }}" />
+              <form method="post" action="/service/frpc/stop" class="inline">
+                <input type="hidden" name="instance_id" value="{{ inst.id }}" />
                 <button type="submit" class="danger">停止</button>
               </form>
             </div>
           </div>
         {% endfor %}
       </div>
+      {% if not states.frpc_instances %}
+        <div class="empty">暂无实例，请先添加</div>
+      {% endif %}
     </section>
 
-    <section>
+    <section class="card">
       <h2>当前目录 toml 文件</h2>
       {% if files %}
         <ul class="file-list">
@@ -83,6 +130,12 @@
         <div class="empty">没有 toml 文件</div>
       {% endif %}
     </section>
+
+    <datalist id="toml-files">
+      {% for f in files %}
+        <option value="{{ f }}"></option>
+      {% endfor %}
+    </datalist>
   </div>
 </body>
 </html>

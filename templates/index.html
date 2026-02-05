@@ -6,8 +6,15 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  <div class="bg-orb"></div>
   <div class="container">
-    <h1>FRP 文件管理</h1>
+    <header class="hero">
+      <div>
+        <h1>FRP 文件管理</h1>
+        <p class="sub">快速切换目录、编辑配置，并管理多个 FRPC 实例。</p>
+      </div>
+      <a class="btn" href="{{ url_for('service_page') }}">服务管理</a>
+    </header>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -19,13 +26,19 @@
       {% endif %}
     {% endwith %}
 
-    <section>
+    <section class="card">
       <h2>当前目录</h2>
       <div class="row">
         <div class="path">{{ directory }}</div>
         <form method="post" action="/set-dir" class="inline">
           <input type="text" name="dir" placeholder="/path/to/dir" />
           <button type="submit">切换/添加</button>
+        </form>
+      </div>
+      <div class="row">
+        <form method="post" action="/create-dir" class="inline">
+          <input type="text" name="new_dir" placeholder="新建目录（支持相对路径）" />
+          <button type="submit">新建并切换</button>
         </form>
       </div>
       <div class="row">
@@ -45,8 +58,14 @@
       </div>
     </section>
 
-    <section>
-      <h2>配置文件</h2>
+    <section class="card">
+      <div class="row between">
+        <h2>配置文件</h2>
+        <form method="post" action="/create-file" class="inline">
+          <input type="text" name="new_file" placeholder="新建 config.toml" />
+          <button type="submit">新建</button>
+        </form>
+      </div>
       {% if files %}
         <ul class="file-list">
           {% for f in files %}
@@ -60,14 +79,24 @@
       {% endif %}
     </section>
 
-    <section>
+    <section class="card">
       <h2>服务状态</h2>
       <div class="row">
-        <div>frpc: {{ '运行中' if states.frpc.running else '未运行' }} (守护: {{ '是' if states.frpc.desired else '否' }})</div>
         <div>frps: {{ '运行中' if states.frps.running else '未运行' }} (守护: {{ '是' if states.frps.desired else '否' }})</div>
       </div>
-      <div class="row">
-        <a class="btn" href="{{ url_for('service_page') }}">进入服务管理</a>
+      <div class="divider"></div>
+      <div class="row wrap">
+        {% if states.frpc_instances %}
+          {% for inst in states.frpc_instances %}
+            <div class="pill">
+              <strong>{{ inst.id }}</strong>
+              <span>{{ '运行中' if inst.running else '未运行' }}</span>
+              <span>守护: {{ '是' if inst.desired else '否' }}</span>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="empty">还没有 FRPC 实例</div>
+        {% endif %}
       </div>
     </section>
   </div>

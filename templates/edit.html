@@ -6,8 +6,15 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  <div class="bg-orb"></div>
   <div class="container">
-    <h1>编辑 {{ filename }}</h1>
+    <header class="hero">
+      <div>
+        <h1>编辑 {{ filename }}</h1>
+        <p class="sub">保存后会自动重启使用该配置的服务。</p>
+      </div>
+      <a class="btn" href="{{ url_for('index') }}">返回列表</a>
+    </header>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -20,11 +27,10 @@
     {% endwith %}
 
     <div class="row">
-      <a class="btn" href="{{ url_for('index') }}">返回列表</a>
       <div class="path">{{ directory }}</div>
     </div>
 
-    <form method="post" action="{{ url_for('save_file', filename=filename) }}">
+    <form method="post" action="{{ url_for('save_file', filename=filename) }}" class="card">
       <textarea name="content" rows="26">{{ content }}</textarea>
       <div class="row">
         <button type="submit">保存并应用</button>

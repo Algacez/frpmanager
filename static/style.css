@@ -1,28 +1,67 @@
 :root {
-  --bg: #f7f7f2;
-  --ink: #1c1d22;
-  --muted: #6c7280;
-  --accent: #2e7d32;
-  --danger: #c62828;
+  --bg: #f6f2ea;
+  --ink: #1d1d1f;
+  --muted: #6f6b63;
+  --accent: #1f7a5c;
+  --accent-2: #b06b3f;
+  --danger: #b3261e;
   --card: #ffffff;
-  --border: #e1e3ea;
+  --border: #e5ded3;
+  --shadow: 0 8px 24px rgba(31, 19, 7, 0.08);
 }
 
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font-family: "Source Han Sans", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: var(--bg);
+  font-family: "Palatino Linotype", "Book Antiqua", Palatino, "Source Han Serif", "Noto Serif CJK SC", serif;
+  background: linear-gradient(180deg, #f6f2ea 0%, #fdfbf6 100%);
   color: var(--ink);
+  min-height: 100vh;
 }
+
+.bg-orb {
+  position: fixed;
+  top: -120px;
+  right: -80px;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle at 30% 30%, rgba(176, 107, 63, 0.25), transparent 60%);
+  z-index: -1;
+}
+
 .container {
-  max-width: 980px;
+  max-width: 1020px;
   margin: 28px auto 60px;
   padding: 0 20px;
 }
 
-h1 { margin: 0 0 16px; }
-h2 { margin: 24px 0 10px; }
+.hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: 0.5px; }
+h2 { margin: 0 0 10px; font-size: 20px; }
+h3 { margin: 0; font-size: 18px; }
+
+.sub { margin: 0; color: var(--muted); }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: var(--shadow);
+  margin-top: 16px;
+}
+
+.card.inner {
+  padding: 14px;
+  box-shadow: none;
+  border-style: dashed;
+}
 
 .row {
   display: flex;
@@ -31,10 +70,13 @@ h2 { margin: 24px 0 10px; }
   flex-wrap: wrap;
 }
 
+.row.between { justify-content: space-between; }
+.row.wrap { flex-wrap: wrap; }
+
 .stack {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .path {
@@ -43,7 +85,7 @@ h2 { margin: 24px 0 10px; }
   background: #fff;
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .file-list {
@@ -63,58 +105,75 @@ textarea {
   font-size: 14px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
 input[type="text"] {
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
+  min-width: 200px;
 }
 
 button, .btn {
   background: var(--accent);
   color: #fff;
   border: none;
-  padding: 8px 12px;
-  border-radius: 6px;
+  padding: 9px 14px;
+  border-radius: 10px;
   cursor: pointer;
   text-decoration: none;
+  font-weight: 600;
 }
+
+button:hover, .btn:hover { filter: brightness(0.95); }
 
 button.danger, .tag.danger {
   background: var(--danger);
 }
 
-.inline { display: inline-flex; gap: 6px; }
+.inline { display: inline-flex; gap: 8px; align-items: center; }
 
 .tag-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .tag {
-  background: #eceff1;
+  background: #f1ede6;
   color: var(--ink);
   border: 1px solid var(--border);
 }
 
-.messages { display: grid; gap: 8px; margin-bottom: 10px; }
-.msg { padding: 8px 10px; border-radius: 6px; }
-.msg.success { background: #e8f5e9; color: #2e7d32; }
-.msg.error { background: #ffebee; color: #c62828; }
+.messages { display: grid; gap: 8px; margin: 14px 0; }
+.msg { padding: 10px 12px; border-radius: 8px; }
+.msg.success { background: #e6f4ef; color: #1f7a5c; }
+.msg.error { background: #fdecea; color: #b3261e; }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 12px;
-}
-
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px;
-  display: grid;
-  gap: 8px;
+  margin-top: 10px;
 }
 
 .error { color: var(--danger); }
 .empty { color: var(--muted); }
+
+.pill {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f4f1eb;
+  border: 1px solid var(--border);
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 10px 0;
+}
+
+@media (max-width: 720px) {
+  .hero { flex-direction: column; align-items: flex-start; }
+  input[type="text"] { min-width: 140px; }
+}
