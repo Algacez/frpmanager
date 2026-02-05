@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>编辑 frps 配置</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="bg-orb"></div>
+  <div class="container">
+    <header class="hero">
+      <div>
+        <h1>编辑 {{ filename }}</h1>
+        <p class="sub">该文件固定保存在项目目录下。</p>
+      </div>
+      <a class="btn" href="{{ url_for('service_page') }}">返回服务管理</a>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="messages">
+          {% for category, msg in messages %}
+            <div class="msg {{ category }}">{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <form method="post" action="{{ url_for('frps_save') }}" class="card">
+      <textarea name="content" rows="26">{{ content }}</textarea>
+      <div class="row">
+        <button type="submit">保存并应用</button>
+      </div>
+    </form>
+  </div>
+</body>
+</html>

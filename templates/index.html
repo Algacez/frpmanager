@@ -36,6 +36,16 @@
         </form>
       </div>
       <div class="row">
+        <form method="post" action="/set-dir" class="inline">
+          <select name="dir" class="wide-input">
+            {% for d in settings.managed_dirs %}
+              <option value="{{ d }}" {% if d == directory|string %}selected{% endif %}>{{ d }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">切换已有目录</button>
+        </form>
+      </div>
+      <div class="row">
         <form method="post" action="/create-dir" class="inline">
           <input type="text" name="new_dir" placeholder="新建目录（支持相对路径）" />
           <button type="submit">新建并切换</button>
@@ -71,6 +81,10 @@
           {% for f in files %}
             <li>
               <a href="{{ url_for('edit_file', filename=f.name) }}">{{ f.name }}</a>
+              <form method="post" action="/delete-file" class="inline">
+                <input type="hidden" name="filename" value="{{ f.name }}" />
+                <button type="submit" class="danger">删除</button>
+              </form>
             </li>
           {% endfor %}
         </ul>

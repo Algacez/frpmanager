@@ -29,6 +29,19 @@ DEFAULT_SETTINGS = {
     "frpc_instances": [],
 }
 
+FRPC_TEMPLATE = """serverAddr = \"1.1.1.1\"
+serverPort = 7000
+
+[[proxies]]
+name = \"ssh\"
+type = \"tcp\"
+localIP = \"127.0.0.1\"
+localPort = 22
+remotePort = 18022
+"""
+
+FRPS_TEMPLATE = """bindPort = 7000
+"""
 
 class ServiceState:
     def __init__(self) -> None:
@@ -60,6 +73,8 @@ def load_settings() -> Dict[str, Any]:
     if "services" not in settings:
         settings["services"] = DEFAULT_SETTINGS["services"].copy()
     settings["services"].setdefault("frps", {"config": ""})
+    if not settings["services"]["frps"].get("config"):
+        settings["services"]["frps"]["config"] = str(_frps_config_path())
 
     if "frpc_instances" not in settings or not isinstance(settings["frpc_instances"], list):
         settings["frpc_instances"] = []
@@ -89,6 +104,10 @@ def _normalize_instances(settings: Dict[str, Any]) -> None:
             continue
         unique[inst_id] = {"id": inst_id, "config": str(item.get("config", "")).strip()}
     settings["frpc_instances"] = list(unique.values())
+
+
+def _frps_config_path() -> Path:
+    return ROOT / "frps.toml"
 
 
 def safe_dir(path_str: str) -> Optional[Path]:
@@ -130,6 +149,18 @@ def ensure_in_dir(file_path: Path, directory: Path) -> bool:
         return directory in file_path.resolve().parents
     except Exception:
         return False
+
+
+def ensure_in_managed_dirs(file_path: Path, settings: Dict[str, Any]) -> bool:
+    try:
+        resolved = file_path.resolve()
+    except Exception:
+        return False
+    for d in settings.get("managed_dirs", []):
+        base = safe_dir(d)
+        if base and base in resolved.parents:
+            return True
+    return False
 
 
 def service_path(settings: Dict[str, Any], name: str) -> str:
@@ -269,6 +300,22 @@ def _validate_instance_id(instance_id: str) -> bool:
     return all(ch in allowed for ch in instance_id)
 
 
+def _sanitize_instance_id(raw: str) -> str:
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+    cleaned = "".join(ch if ch in allowed else "-" for ch in raw)
+    return cleaned.strip("-_")
+
+
+def _unique_instance_id(settings: Dict[str, Any], base_id: str) -> str:
+    existing = {i.get("id") for i in settings.get("frpc_instances", [])}
+    if base_id not in existing:
+        return base_id
+    idx = 2
+    while f"{base_id}-{idx}" in existing:
+        idx += 1
+    return f"{base_id}-{idx}"
+
+
 @app.route("/")
 def index() -> str:
     settings = load_settings()
@@ -361,12 +408,34 @@ def create_file() -> Any:
     if not ensure_in_dir(file_path, directory):
         abort(403)
     try:
-        file_path.write_text("", encoding="utf-8")
+        file_path.write_text(FRPC_TEMPLATE, encoding="utf-8")
     except Exception as exc:
         flash(f"创建失败: {exc}", "error")
         return redirect(url_for("index"))
     flash("已创建配置文件", "success")
     return redirect(url_for("edit_file", filename=name))
+
+
+@app.route("/delete-file", methods=["POST"])
+def delete_file() -> Any:
+    settings = load_settings()
+    directory = current_dir(settings)
+    name = request.form.get("filename", "").strip()
+    file_path = (directory / name).resolve()
+    if not file_path.exists() or not ensure_in_dir(file_path, directory):
+        abort(404)
+    try:
+        file_path.unlink()
+    except Exception as exc:
+        flash(f"删除失败: {exc}", "error")
+        return redirect(url_for("index"))
+    # Clear bindings if any instance uses it
+    for inst in settings.get("frpc_instances", []):
+        if inst.get("config") and Path(inst["config"]).resolve() == file_path:
+            inst["config"] = ""
+    save_settings(settings)
+    flash("已删除配置文件", "success")
+    return redirect(url_for("index"))
 
 
 @app.route("/edit/<path:filename>")
@@ -417,6 +486,42 @@ def save_file(filename: str) -> Any:
     return redirect(url_for("edit_file", filename=filename))
 
 
+@app.route("/frps/edit")
+def frps_edit() -> str:
+    settings = load_settings()
+    file_path = _frps_config_path()
+    if not file_path.exists():
+        try:
+            file_path.write_text(FRPS_TEMPLATE, encoding="utf-8")
+        except Exception as exc:
+            flash(f"创建 frps 配置失败: {exc}", "error")
+            return redirect(url_for("service_page"))
+    content = file_path.read_text(encoding="utf-8")
+    return render_template(
+        "frps_edit.html",
+        settings=settings,
+        filename=file_path.name,
+        content=content,
+        states=_service_status(),
+    )
+
+
+@app.route("/frps/save", methods=["POST"])
+def frps_save() -> Any:
+    settings = load_settings()
+    file_path = _frps_config_path()
+    content = request.form.get("content", "")
+    file_path.write_text(content, encoding="utf-8")
+    settings["services"]["frps"]["config"] = str(file_path)
+    save_settings(settings)
+    flash("frps 配置已保存", "success")
+    with SERVICE_LOCK:
+        if FRPS_STATE.desired_running:
+            _stop_process(FRPS_STATE)
+            _start_frps()
+    return redirect(url_for("frps_edit"))
+
+
 @app.route("/service")
 def service_page() -> str:
     settings = load_settings()
@@ -427,6 +532,7 @@ def service_page() -> str:
         directory=directory,
         states=_service_status(),
         files=list_toml_files(directory),
+        frps_config_path=_frps_config_path(),
     )
 
 
@@ -443,15 +549,10 @@ def service_update() -> Any:
 @app.route("/service/frps/set-config", methods=["POST"])
 def frps_set_config() -> Any:
     settings = load_settings()
-    config_path = request.form.get("config_path", "").strip()
-    if config_path:
-        cfg = Path(config_path).expanduser().resolve()
-        if not cfg.exists():
-            flash("配置文件不存在", "error")
-            return redirect(url_for("service_page"))
-        settings["services"]["frps"]["config"] = str(cfg)
-        save_settings(settings)
-        flash("已更新配置文件", "success")
+    config_path = _frps_config_path()
+    settings["services"]["frps"]["config"] = str(config_path)
+    save_settings(settings)
+    flash("已绑定 frps 配置", "success")
     return redirect(url_for("service_page"))
 
 
@@ -490,12 +591,22 @@ def frpc_add() -> Any:
     settings = load_settings()
     instance_id = request.form.get("instance_id", "").strip()
     config_path = request.form.get("config_path", "").strip()
+    if not instance_id:
+        if not config_path:
+            flash("请至少填写实例名或选择配置文件", "error")
+            return redirect(url_for("service_page"))
+        instance_id = Path(config_path).expanduser().name
+        if instance_id.endswith(".toml"):
+            instance_id = instance_id[:-5]
+        instance_id = _sanitize_instance_id(instance_id)
+        if not instance_id:
+            flash("无法从配置文件名生成实例名，请手动填写", "error")
+            return redirect(url_for("service_page"))
     if not _validate_instance_id(instance_id):
         flash("实例名仅支持字母/数字/-/_", "error")
         return redirect(url_for("service_page"))
     if _find_instance(settings, instance_id):
-        flash("实例已存在", "error")
-        return redirect(url_for("service_page"))
+        instance_id = _unique_instance_id(settings, instance_id)
     if config_path:
         cfg = Path(config_path).expanduser().resolve()
         if not cfg.exists():
@@ -539,6 +650,42 @@ def frpc_set_config() -> Any:
         instance["config"] = str(cfg)
         save_settings(settings)
         flash("已更新配置文件", "success")
+    return redirect(url_for("service_page"))
+
+
+@app.route("/service/frpc/delete-config", methods=["POST"])
+def frpc_delete_config() -> Any:
+    settings = load_settings()
+    instance_id = request.form.get("instance_id", "").strip()
+    instance = _find_instance(settings, instance_id)
+    if not instance:
+        abort(404)
+    cfg_path = instance.get("config", "")
+    if not cfg_path:
+        flash("该实例未设置配置文件", "error")
+        return redirect(url_for("service_page"))
+    file_path = Path(cfg_path)
+    if not file_path.exists():
+        instance["config"] = ""
+        save_settings(settings)
+        flash("配置文件已不存在，已清除绑定", "success")
+        return redirect(url_for("service_page"))
+    if not ensure_in_managed_dirs(file_path, settings):
+        flash("仅允许删除已管理目录内的配置文件", "error")
+        return redirect(url_for("service_page"))
+    try:
+        file_path.unlink()
+    except Exception as exc:
+        flash(f"删除失败: {exc}", "error")
+        return redirect(url_for("service_page"))
+    instance["config"] = ""
+    save_settings(settings)
+    with SERVICE_LOCK:
+        state = _ensure_frpc_state(instance_id)
+        if state.desired_running:
+            state.desired_running = False
+            _stop_process(state)
+    flash("已删除配置文件并停止实例", "success")
     return redirect(url_for("service_page"))
 
 

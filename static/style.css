@@ -96,6 +96,12 @@ h3 { margin: 0; font-size: 18px; }
   gap: 8px;
 }
 
+.file-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .file-list a { color: var(--accent); text-decoration: none; }
 .file-list a:hover { text-decoration: underline; }
 
@@ -114,6 +120,18 @@ input[type="text"] {
   border: 1px solid var(--border);
   border-radius: 8px;
   min-width: 200px;
+}
+
+select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.wide-input {
+  min-width: 560px;
+  width: 100%;
 }
 
 button, .btn {
@@ -176,4 +194,5 @@ button.danger, .tag.danger {
 @media (max-width: 720px) {
   .hero { flex-direction: column; align-items: flex-start; }
   input[type="text"] { min-width: 140px; }
+  .wide-input { min-width: 220px; width: 100%; }
 }

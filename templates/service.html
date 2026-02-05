@@ -27,6 +27,21 @@
     {% endwith %}
 
     <section class="card">
+      <h2>配置目录</h2>
+      <div class="row">
+        <div class="path">{{ directory }}</div>
+        <form method="post" action="/set-dir" class="inline">
+          <select name="dir" class="wide-input">
+            {% for d in settings.managed_dirs %}
+              <option value="{{ d }}" {% if d == directory|string %}selected{% endif %}>{{ d }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">切换已有目录</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>程序路径</h2>
       <form method="post" action="/service/update" class="stack">
         <label>frpc 路径</label>
@@ -42,16 +57,13 @@
       <div class="row wrap">
         <div>状态: {{ '运行中' if states.frps.running else '未运行' }}</div>
         <div>守护: {{ '是' if states.frps.desired else '否' }}</div>
-        <div>配置: {{ states.frps.config or '未设置' }}</div>
+        <div>配置: {{ frps_config_path }}</div>
       </div>
       {% if states.frps.error %}
         <div class="error">{{ states.frps.error }}</div>
       {% endif %}
       <div class="row">
-        <form method="post" action="/service/frps/set-config" class="inline">
-          <input type="text" name="config_path" placeholder="/path/to/frps.toml" list="toml-files" />
-          <button type="submit">设置配置</button>
-        </form>
+        <a class="btn" href="{{ url_for('frps_edit') }}">编辑 frps 配置</a>
       </div>
       <div class="row">
         <form method="post" action="/service/frps/start" class="inline">
@@ -71,7 +83,7 @@
         <h2>frpc 实例</h2>
         <form method="post" action="/service/frpc/add" class="inline">
           <input type="text" name="instance_id" placeholder="实例名，如 office" />
-          <input type="text" name="config_path" placeholder="/path/to/frpc.toml" list="toml-files" />
+          <input type="text" name="config_path" placeholder="/path/to/frpc.toml" list="toml-files" class="wide-input" />
           <button type="submit">添加实例</button>
         </form>
       </div>
@@ -93,8 +105,12 @@
             {% endif %}
             <form method="post" action="/service/frpc/set-config" class="stack">
               <input type="hidden" name="instance_id" value="{{ inst.id }}" />
-              <input type="text" name="config_path" placeholder="/path/to/frpc.toml" list="toml-files" />
+              <input type="text" name="config_path" placeholder="/path/to/frpc.toml" list="toml-files" class="wide-input" />
               <button type="submit">设置配置</button>
+            </form>
+            <form method="post" action="/service/frpc/delete-config" class="inline">
+              <input type="hidden" name="instance_id" value="{{ inst.id }}" />
+              <button type="submit" class="danger">删除配置文件</button>
             </form>
             <div class="row">
               <form method="post" action="/service/frpc/start" class="inline">
