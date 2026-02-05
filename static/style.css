@@ -1,0 +1,120 @@
+:root {
+  --bg: #f7f7f2;
+  --ink: #1c1d22;
+  --muted: #6c7280;
+  --accent: #2e7d32;
+  --danger: #c62828;
+  --card: #ffffff;
+  --border: #e1e3ea;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Source Han Sans", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+.container {
+  max-width: 980px;
+  margin: 28px auto 60px;
+  padding: 0 20px;
+}
+
+h1 { margin: 0 0 16px; }
+h2 { margin: 24px 0 10px; }
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.path {
+  font-family: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  color: var(--muted);
+  background: #fff;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.file-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.file-list a { color: var(--accent); text-decoration: none; }
+.file-list a:hover { text-decoration: underline; }
+
+textarea {
+  width: 100%;
+  font-family: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  font-size: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+input[type="text"] {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+button, .btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+button.danger, .tag.danger {
+  background: var(--danger);
+}
+
+.inline { display: inline-flex; gap: 6px; }
+
+.tag-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag {
+  background: #eceff1;
+  color: var(--ink);
+  border: 1px solid var(--border);
+}
+
+.messages { display: grid; gap: 8px; margin-bottom: 10px; }
+.msg { padding: 8px 10px; border-radius: 6px; }
+.msg.success { background: #e8f5e9; color: #2e7d32; }
+.msg.error { background: #ffebee; color: #c62828; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.error { color: var(--danger); }
+.empty { color: var(--muted); }

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>服务管理</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="container">
+    <h1>FRP 服务管理</h1>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="messages">
+          {% for category, msg in messages %}
+            <div class="msg {{ category }}">{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="row">
+      <a class="btn" href="{{ url_for('index') }}">返回</a>
+      <div class="path">当前目录: {{ directory }}</div>
+    </div>
+
+    <section>
+      <h2>程序路径</h2>
+      <form method="post" action="/service/update" class="stack">
+        <label>frpc 路径</label>
+        <input type="text" name="frpc_path" value="{{ settings.frpc_path }}" placeholder="/path/to/frpc" />
+        <label>frps 路径</label>
+        <input type="text" name="frps_path" value="{{ settings.frps_path }}" placeholder="/path/to/frps" />
+        <button type="submit">保存路径</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>服务配置</h2>
+      <div class="grid">
+        {% for name in ['frpc','frps'] %}
+          <div class="card">
+            <h3>{{ name }}</h3>
+            <div>状态: {{ '运行中' if states[name].running else '未运行' }}</div>
+            <div>守护: {{ '是' if states[name].desired else '否' }}</div>
+            <div>配置: {{ states[name].config or '未设置' }}</div>
+            {% if states[name].error %}
+              <div class="error">{{ states[name].error }}</div>
+            {% endif %}
+            <form method="post" action="/service/set-config" class="stack">
+              <input type="hidden" name="name" value="{{ name }}" />
+              <input type="text" name="config_path" placeholder="/path/to/config.toml" />
+              <button type="submit">设置配置</button>
+            </form>
+            <div class="row">
+              <form method="post" action="/service/start" class="inline">
+                <input type="hidden" name="name" value="{{ name }}" />
+                <button type="submit">启动/守护</button>
+              </form>
+              <form method="post" action="/service/restart" class="inline">
+                <input type="hidden" name="name" value="{{ name }}" />
+                <button type="submit">重启</button>
+              </form>
+              <form method="post" action="/service/stop" class="inline">
+                <input type="hidden" name="name" value="{{ name }}" />
+                <button type="submit" class="danger">停止</button>
+              </form>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section>
+      <h2>当前目录 toml 文件</h2>
+      {% if files %}
+        <ul class="file-list">
+          {% for f in files %}
+            <li>{{ f.name }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="empty">没有 toml 文件</div>
+      {% endif %}
+    </section>
+  </div>
+</body>
+</html>

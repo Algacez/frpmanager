@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>FRP 文件管理</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="container">
+    <h1>FRP 文件管理</h1>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="messages">
+          {% for category, msg in messages %}
+            <div class="msg {{ category }}">{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <section>
+      <h2>当前目录</h2>
+      <div class="row">
+        <div class="path">{{ directory }}</div>
+        <form method="post" action="/set-dir" class="inline">
+          <input type="text" name="dir" placeholder="/path/to/dir" />
+          <button type="submit">切换/添加</button>
+        </form>
+      </div>
+      <div class="row">
+        <label>已管理目录:</label>
+        <div class="tag-list">
+          {% for d in settings.managed_dirs %}
+            <form method="post" action="/set-dir" class="inline">
+              <input type="hidden" name="dir" value="{{ d }}" />
+              <button type="submit" class="tag">{{ d }}</button>
+            </form>
+            <form method="post" action="/remove-dir" class="inline">
+              <input type="hidden" name="dir" value="{{ d }}" />
+              <button type="submit" class="tag danger">移除</button>
+            </form>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>配置文件</h2>
+      {% if files %}
+        <ul class="file-list">
+          {% for f in files %}
+            <li>
+              <a href="{{ url_for('edit_file', filename=f.name) }}">{{ f.name }}</a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="empty">当前目录下没有 toml 文件</div>
+      {% endif %}
+    </section>
+
+    <section>
+      <h2>服务状态</h2>
+      <div class="row">
+        <div>frpc: {{ '运行中' if states.frpc.running else '未运行' }} (守护: {{ '是' if states.frpc.desired else '否' }})</div>
+        <div>frps: {{ '运行中' if states.frps.running else '未运行' }} (守护: {{ '是' if states.frps.desired else '否' }})</div>
+      </div>
+      <div class="row">
+        <a class="btn" href="{{ url_for('service_page') }}">进入服务管理</a>
+      </div>
+    </section>
+  </div>
+</body>
+</html>
