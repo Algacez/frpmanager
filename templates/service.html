@@ -58,6 +58,7 @@
         <div>状态: {{ '运行中' if states.frps.running else '未运行' }}</div>
         <div>守护: {{ '是' if states.frps.desired else '否' }}</div>
         <div>配置: {{ frps_config_path }}</div>
+        <div>systemd 单元: {{ states.frps.unit_name }} ({{ '已安装' if states.frps.unit_exists else '未安装' }})</div>
       </div>
       {% if states.frps.error %}
         <div class="error">{{ states.frps.error }}</div>
@@ -66,6 +67,9 @@
         <a class="btn" href="{{ url_for('frps_edit') }}">编辑 frps 配置</a>
       </div>
       <div class="row">
+        <form method="post" action="/service/systemd/frps/install" class="inline">
+          <button type="submit">生成 systemd 服务文件</button>
+        </form>
         <form method="post" action="/service/frps/start" class="inline">
           <button type="submit">启动/守护</button>
         </form>
@@ -83,11 +87,6 @@
         <h2>frpc 实例</h2>
         <form method="post" action="/service/frpc/add" class="inline">
           <input type="text" name="instance_id" placeholder="实例名，如 office" />
-          <select name="config_dir" class="wide-input">
-            {% for d in settings.managed_dirs %}
-              <option value="{{ d }}" {% if d == directory|string %}selected{% endif %}>{{ d }}</option>
-            {% endfor %}
-          </select>
           <select name="config_name" class="wide-input">
             <option value="">选择配置文件</option>
             {% for f in files %}
@@ -110,16 +109,12 @@
             <div>状态: {{ '运行中' if inst.running else '未运行' }}</div>
             <div>守护: {{ '是' if inst.desired else '否' }}</div>
             <div>配置: {{ inst.config or '未设置' }}</div>
+            <div>systemd 单元: {{ inst.unit_name }} ({{ '已安装' if inst.unit_exists else '未安装' }})</div>
             {% if inst.error %}
               <div class="error">{{ inst.error }}</div>
             {% endif %}
             <form method="post" action="/service/frpc/set-config" class="stack">
               <input type="hidden" name="instance_id" value="{{ inst.id }}" />
-              <select name="config_dir" class="wide-input">
-                {% for d in settings.managed_dirs %}
-                  <option value="{{ d }}" {% if d == directory|string %}selected{% endif %}>{{ d }}</option>
-                {% endfor %}
-              </select>
               <select name="config_name" class="wide-input">
                 <option value="">选择配置文件</option>
                 {% for f in files %}
@@ -133,6 +128,10 @@
               <button type="submit" class="danger">删除配置文件</button>
             </form>
             <div class="row">
+              <form method="post" action="/service/systemd/frpc/install" class="inline">
+                <input type="hidden" name="instance_id" value="{{ inst.id }}" />
+                <button type="submit">生成 systemd 服务文件</button>
+              </form>
               <form method="post" action="/service/frpc/start" class="inline">
                 <input type="hidden" name="instance_id" value="{{ inst.id }}" />
                 <button type="submit">启动/守护</button>

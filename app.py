@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from flask import Flask, abort, flash, redirect, render_template, request, url_for
 
@@ -16,6 +17,9 @@ app.secret_key = "frpmanager-dev"
 
 ROOT = Path(__file__).resolve().parent
 SETTINGS_FILE = ROOT / "settings.json"
+SYSTEMD_DIR = Path("/etc/systemd/system")
+SYSTEMD_UNIT_PREFIX = "frp"
+SYSTEMD_ENV_PATH = "PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 DEFAULT_SETTINGS = {
@@ -73,8 +77,7 @@ def load_settings() -> Dict[str, Any]:
     if "services" not in settings:
         settings["services"] = DEFAULT_SETTINGS["services"].copy()
     settings["services"].setdefault("frps", {"config": ""})
-    if not settings["services"]["frps"].get("config"):
-        settings["services"]["frps"]["config"] = str(_frps_config_path())
+    settings["services"]["frps"]["config"] = str(_frps_config_path(settings))
 
     if "frpc_instances" not in settings or not isinstance(settings["frpc_instances"], list):
         settings["frpc_instances"] = []
@@ -106,8 +109,105 @@ def _normalize_instances(settings: Dict[str, Any]) -> None:
     settings["frpc_instances"] = list(unique.values())
 
 
-def _frps_config_path() -> Path:
-    return ROOT / "frps.toml"
+def _frps_config_path(settings: Dict[str, Any]) -> Path:
+    return current_dir(settings) / "frps.toml"
+
+
+def _systemd_unit_name_frps() -> str:
+    return f"{SYSTEMD_UNIT_PREFIX}-frps.service"
+
+
+def _systemd_unit_name_frpc(instance_id: str) -> str:
+    return f"{SYSTEMD_UNIT_PREFIX}-frpc-{instance_id}.service"
+
+
+def _systemd_unit_path(unit_name: str) -> Path:
+    return SYSTEMD_DIR / unit_name
+
+
+def _systemd_available() -> bool:
+    return shutil.which("systemctl") is not None
+
+
+def _systemd_run(args: list[str]) -> Tuple[int, str, str]:
+    try:
+        result = subprocess.run(args, check=False, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        return 127, "", str(exc)
+    return result.returncode, result.stdout.strip(), result.stderr.strip()
+
+
+def _systemd_query(unit_name: str) -> Dict[str, Any]:
+    info = {"exists": False, "active": False, "enabled": False, "error": ""}
+    if not _systemd_unit_path(unit_name).exists():
+        return info
+    info["exists"] = True
+    if not _systemd_available():
+        info["error"] = "systemctl 不可用"
+        return info
+    code, out, err = _systemd_run(["systemctl", "is-active", unit_name])
+    if code == 0 and out.strip() == "active":
+        info["active"] = True
+    elif err:
+        info["error"] = err
+    code, out, err = _systemd_run(["systemctl", "is-enabled", unit_name])
+    if code == 0 and out.strip() == "enabled":
+        info["enabled"] = True
+    elif err and not info["error"]:
+        info["error"] = err
+    return info
+
+
+def _systemd_action(unit_name: str, action: str, extra_args: Optional[list[str]] = None) -> Optional[str]:
+    if not _systemd_available():
+        return "systemctl 不可用"
+    args = ["systemctl", action]
+    if extra_args:
+        args.extend(extra_args)
+    args.append(unit_name)
+    code, _, err = _systemd_run(args)
+    if code != 0:
+        return err or f"systemctl {action} 失败"
+    return None
+
+
+def _build_systemd_unit(description: str, working_dir: Path, binary: str, config_path: str) -> str:
+    return "\n".join(
+        [
+            "[Unit]",
+            f"Description={description}",
+            "After=network-online.target",
+            "",
+            "[Service]",
+            f"WorkingDirectory={working_dir}",
+            f"ExecStart={binary} -c {config_path}",
+            f'Environment="{SYSTEMD_ENV_PATH}"',
+            "",
+            "# 丢弃所有日志输出",
+            "StandardOutput=null",
+            "StandardError=null",
+            "",
+            "User=root",
+            "Restart=always",
+            "RestartSec=5",
+            "",
+            "[Install]",
+            "WantedBy=multi-user.target",
+            "",
+        ]
+    )
+
+
+def _write_systemd_unit(unit_name: str, content: str) -> Optional[str]:
+    try:
+        _systemd_unit_path(unit_name).write_text(content, encoding="utf-8")
+    except Exception as exc:
+        return str(exc)
+    if _systemd_available():
+        code, _, err = _systemd_run(["systemctl", "daemon-reload"])
+        if code != 0:
+            return err or "systemctl daemon-reload 失败"
+    return None
 
 
 def safe_dir(path_str: str) -> Optional[Path]:
@@ -471,16 +571,25 @@ def save_file(filename: str) -> Any:
     with SERVICE_LOCK:
         # Restart frps if using this config
         frps_cfg = settings["services"]["frps"].get("config", "")
-        if frps_cfg and Path(frps_cfg).resolve() == file_path and FRPS_STATE.desired_running:
-            _stop_process(FRPS_STATE)
-            _start_frps()
+        if frps_cfg and Path(frps_cfg).resolve() == file_path:
+            unit_name = _systemd_unit_name_frps()
+            unit_info = _systemd_query(unit_name)
+            if unit_info["exists"] and unit_info["active"]:
+                _systemd_action(unit_name, "restart")
+            elif FRPS_STATE.desired_running:
+                _stop_process(FRPS_STATE)
+                _start_frps()
 
         # Restart frpc instances using this config
         for inst in settings.get("frpc_instances", []):
             cfg = inst.get("config", "")
             if cfg and Path(cfg).resolve() == file_path:
                 state = _ensure_frpc_state(inst["id"])
-                if state.desired_running:
+                unit_name = _systemd_unit_name_frpc(inst["id"])
+                unit_info = _systemd_query(unit_name)
+                if unit_info["exists"] and unit_info["active"]:
+                    _systemd_action(unit_name, "restart")
+                elif state.desired_running:
                     _stop_process(state)
                     _start_frpc(inst["id"])
 
@@ -490,7 +599,7 @@ def save_file(filename: str) -> Any:
 @app.route("/frps/edit")
 def frps_edit() -> str:
     settings = load_settings()
-    file_path = _frps_config_path()
+    file_path = _frps_config_path(settings)
     if not file_path.exists():
         try:
             file_path.write_text(FRPS_TEMPLATE, encoding="utf-8")
@@ -510,14 +619,19 @@ def frps_edit() -> str:
 @app.route("/frps/save", methods=["POST"])
 def frps_save() -> Any:
     settings = load_settings()
-    file_path = _frps_config_path()
+    file_path = _frps_config_path(settings)
     content = request.form.get("content", "")
     file_path.write_text(content, encoding="utf-8")
     settings["services"]["frps"]["config"] = str(file_path)
     save_settings(settings)
     flash("frps 配置已保存", "success")
     with SERVICE_LOCK:
-        if FRPS_STATE.desired_running:
+        unit_info = _systemd_query(_systemd_unit_name_frps())
+        if unit_info["exists"] and unit_info["active"]:
+            error = _systemd_action(_systemd_unit_name_frps(), "restart")
+            if error:
+                flash(f"systemd 重启失败: {error}", "error")
+        elif FRPS_STATE.desired_running:
             _stop_process(FRPS_STATE)
             _start_frps()
     return redirect(url_for("frps_edit"))
@@ -533,7 +647,7 @@ def service_page() -> str:
         directory=directory,
         states=_service_status(),
         files=list_toml_files(directory),
-        frps_config_path=_frps_config_path(),
+        frps_config_path=_frps_config_path(settings),
     )
 
 
@@ -550,7 +664,7 @@ def service_update() -> Any:
 @app.route("/service/frps/set-config", methods=["POST"])
 def frps_set_config() -> Any:
     settings = load_settings()
-    config_path = _frps_config_path()
+    config_path = _frps_config_path(settings)
     settings["services"]["frps"]["config"] = str(config_path)
     save_settings(settings)
     flash("已绑定 frps 配置", "success")
@@ -560,6 +674,14 @@ def frps_set_config() -> Any:
 @app.route("/service/frps/start", methods=["POST"])
 def frps_start() -> Any:
     with SERVICE_LOCK:
+        unit_name = _systemd_unit_name_frps()
+        if _systemd_unit_path(unit_name).exists():
+            error = _systemd_action(unit_name, "enable", ["--now"])
+            if error:
+                flash(f"systemd 启动失败: {error}", "error")
+            else:
+                flash("frps 已通过 systemd 启动并设为开机自启", "success")
+                return redirect(url_for("service_page"))
         FRPS_STATE.desired_running = True
         _ensure_monitor_frps()
         _start_frps()
@@ -570,6 +692,14 @@ def frps_start() -> Any:
 @app.route("/service/frps/stop", methods=["POST"])
 def frps_stop() -> Any:
     with SERVICE_LOCK:
+        unit_name = _systemd_unit_name_frps()
+        if _systemd_unit_path(unit_name).exists():
+            error = _systemd_action(unit_name, "disable", ["--now"])
+            if error:
+                flash(f"systemd 停止失败: {error}", "error")
+            else:
+                flash("frps 已通过 systemd 停止并取消开机自启", "success")
+                return redirect(url_for("service_page"))
         FRPS_STATE.desired_running = False
         _stop_process(FRPS_STATE)
     flash("frps 已停止", "success")
@@ -579,6 +709,14 @@ def frps_stop() -> Any:
 @app.route("/service/frps/restart", methods=["POST"])
 def frps_restart() -> Any:
     with SERVICE_LOCK:
+        unit_name = _systemd_unit_name_frps()
+        if _systemd_unit_path(unit_name).exists():
+            error = _systemd_action(unit_name, "restart")
+            if error:
+                flash(f"systemd 重启失败: {error}", "error")
+            else:
+                flash("frps 已通过 systemd 重启", "success")
+                return redirect(url_for("service_page"))
         FRPS_STATE.desired_running = True
         _stop_process(FRPS_STATE)
         _ensure_monitor_frps()
@@ -591,16 +729,12 @@ def frps_restart() -> Any:
 def frpc_add() -> Any:
     settings = load_settings()
     instance_id = request.form.get("instance_id", "").strip()
-    config_dir = request.form.get("config_dir", "").strip()
     config_name = request.form.get("config_name", "").strip()
     config_path = ""
-    if config_dir or config_name:
-        base = safe_dir(config_dir) if config_dir else current_dir(settings)
+    if config_name:
+        base = current_dir(settings)
         if base is None:
             flash("配置目录无效", "error")
-            return redirect(url_for("service_page"))
-        if not config_name:
-            flash("请选择配置文件", "error")
             return redirect(url_for("service_page"))
         name = config_name
         if name.lower().endswith(".toml"):
@@ -653,18 +787,14 @@ def frpc_remove() -> Any:
 def frpc_set_config() -> Any:
     settings = load_settings()
     instance_id = request.form.get("instance_id", "").strip()
-    config_dir = request.form.get("config_dir", "").strip()
     config_name = request.form.get("config_name", "").strip()
     instance = _find_instance(settings, instance_id)
     if not instance:
         abort(404)
-    if config_dir or config_name:
-        base = safe_dir(config_dir) if config_dir else current_dir(settings)
+    if config_name:
+        base = current_dir(settings)
         if base is None:
             flash("配置目录无效", "error")
-            return redirect(url_for("service_page"))
-        if not config_name:
-            flash("请选择配置文件", "error")
             return redirect(url_for("service_page"))
         name = config_name
         if name.lower().endswith(".toml"):
@@ -696,8 +826,8 @@ def frpc_delete_config() -> Any:
         save_settings(settings)
         flash("配置文件已不存在，已清除绑定", "success")
         return redirect(url_for("service_page"))
-    if not ensure_in_managed_dirs(file_path, settings):
-        flash("仅允许删除已管理目录内的配置文件", "error")
+    if not ensure_in_dir(file_path, current_dir(settings)):
+        flash("仅允许删除当前目录内的配置文件", "error")
         return redirect(url_for("service_page"))
     try:
         file_path.unlink()
@@ -722,6 +852,14 @@ def frpc_start() -> Any:
     if not _find_instance(settings, instance_id):
         abort(404)
     with SERVICE_LOCK:
+        unit_name = _systemd_unit_name_frpc(instance_id)
+        if _systemd_unit_path(unit_name).exists():
+            error = _systemd_action(unit_name, "enable", ["--now"])
+            if error:
+                flash(f"systemd 启动失败: {error}", "error")
+            else:
+                flash("frpc 实例已通过 systemd 启动并设为开机自启", "success")
+                return redirect(url_for("service_page"))
         state = _ensure_frpc_state(instance_id)
         state.desired_running = True
         _ensure_monitor_frpc(instance_id)
@@ -734,6 +872,14 @@ def frpc_start() -> Any:
 def frpc_stop() -> Any:
     instance_id = request.form.get("instance_id", "").strip()
     with SERVICE_LOCK:
+        unit_name = _systemd_unit_name_frpc(instance_id)
+        if _systemd_unit_path(unit_name).exists():
+            error = _systemd_action(unit_name, "disable", ["--now"])
+            if error:
+                flash(f"systemd 停止失败: {error}", "error")
+            else:
+                flash("frpc 实例已通过 systemd 停止并取消开机自启", "success")
+                return redirect(url_for("service_page"))
         state = _ensure_frpc_state(instance_id)
         state.desired_running = False
         _stop_process(state)
@@ -745,6 +891,14 @@ def frpc_stop() -> Any:
 def frpc_restart() -> Any:
     instance_id = request.form.get("instance_id", "").strip()
     with SERVICE_LOCK:
+        unit_name = _systemd_unit_name_frpc(instance_id)
+        if _systemd_unit_path(unit_name).exists():
+            error = _systemd_action(unit_name, "restart")
+            if error:
+                flash(f"systemd 重启失败: {error}", "error")
+            else:
+                flash("frpc 实例已通过 systemd 重启", "success")
+                return redirect(url_for("service_page"))
         state = _ensure_frpc_state(instance_id)
         state.desired_running = True
         _stop_process(state)
@@ -754,30 +908,93 @@ def frpc_restart() -> Any:
     return redirect(url_for("service_page"))
 
 
+@app.route("/service/systemd/frps/install", methods=["POST"])
+def systemd_frps_install() -> Any:
+    settings = load_settings()
+    binary = service_path(settings, "frps")
+    if not binary:
+        flash("请先设置 frps 程序路径", "error")
+        return redirect(url_for("service_page"))
+    working_dir = current_dir(settings)
+    config_path = str(_frps_config_path(settings))
+    unit_name = _systemd_unit_name_frps()
+    content = _build_systemd_unit("frps service", working_dir, binary, config_path)
+    error = _write_systemd_unit(unit_name, content)
+    if error:
+        flash(f"生成 systemd 单元失败: {error}", "error")
+    else:
+        flash(f"已生成 {unit_name}", "success")
+    return redirect(url_for("service_page"))
+
+
+@app.route("/service/systemd/frpc/install", methods=["POST"])
+def systemd_frpc_install() -> Any:
+    settings = load_settings()
+    instance_id = request.form.get("instance_id", "").strip()
+    instance = _find_instance(settings, instance_id)
+    if not instance:
+        abort(404)
+    binary = service_path(settings, "frpc")
+    if not binary:
+        flash("请先设置 frpc 程序路径", "error")
+        return redirect(url_for("service_page"))
+    config_path = instance.get("config", "")
+    if not config_path:
+        flash("请先为该实例设置配置文件", "error")
+        return redirect(url_for("service_page"))
+    if not ensure_in_dir(Path(config_path), current_dir(settings)):
+        flash("该实例配置不在当前目录，无法生成 systemd 单元", "error")
+        return redirect(url_for("service_page"))
+    unit_name = _systemd_unit_name_frpc(instance_id)
+    content = _build_systemd_unit(f"frpc service ({instance_id})", current_dir(settings), binary, config_path)
+    error = _write_systemd_unit(unit_name, content)
+    if error:
+        flash(f"生成 systemd 单元失败: {error}", "error")
+    else:
+        flash(f"已生成 {unit_name}", "success")
+    return redirect(url_for("service_page"))
+
+
 def _service_status() -> Dict[str, Any]:
     settings = load_settings()
+    frps_unit = _systemd_unit_name_frps()
+    frps_systemd = _systemd_query(frps_unit)
     frpc_list = []
     for inst in settings.get("frpc_instances", []):
         instance_id = inst.get("id", "")
         state = _ensure_frpc_state(instance_id)
+        unit_name = _systemd_unit_name_frpc(instance_id)
+        unit_info = _systemd_query(unit_name)
+        running = unit_info["active"] if unit_info["exists"] else is_running(state)
+        desired = unit_info["enabled"] if unit_info["exists"] else state.desired_running
         frpc_list.append(
             {
                 "id": instance_id,
-                "running": is_running(state),
-                "desired": state.desired_running,
+                "running": running,
+                "desired": desired,
                 "config": inst.get("config", ""),
                 "path": settings.get("frpc_path", ""),
-                "error": state.last_error,
+                "error": unit_info["error"] if unit_info["exists"] else state.last_error,
+                "unit_name": unit_name,
+                "unit_exists": unit_info["exists"],
+                "systemd_active": unit_info["active"],
+                "systemd_enabled": unit_info["enabled"],
+                "systemd_error": unit_info["error"],
             }
         )
 
     return {
         "frps": {
-            "running": is_running(FRPS_STATE),
-            "desired": FRPS_STATE.desired_running,
+            "running": frps_systemd["active"] if frps_systemd["exists"] else is_running(FRPS_STATE),
+            "desired": frps_systemd["enabled"] if frps_systemd["exists"] else FRPS_STATE.desired_running,
             "config": settings["services"]["frps"].get("config", ""),
             "path": settings.get("frps_path", ""),
-            "error": FRPS_STATE.last_error,
+            "error": frps_systemd["error"] if frps_systemd["exists"] else FRPS_STATE.last_error,
+            "unit_name": frps_unit,
+            "unit_exists": frps_systemd["exists"],
+            "systemd_active": frps_systemd["active"],
+            "systemd_enabled": frps_systemd["enabled"],
+            "systemd_error": frps_systemd["error"],
         },
         "frpc_instances": frpc_list,
     }
