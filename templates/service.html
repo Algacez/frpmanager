@@ -50,6 +50,16 @@
         <input type="text" name="frps_path" value="{{ settings.frps_path }}" placeholder="/path/to/frps" />
         <button type="submit">保存路径</button>
       </form>
+      <form method="post" action="/service/frp/install" class="row wrap">
+        <input type="text" name="version" value="{{ release_version }}" placeholder="版本号，如 0.67.0" />
+        <select name="asset_name" class="wide-input">
+          <option value="">选择要下载的包</option>
+          {% for asset in release_assets %}
+            <option value="{{ asset.name }}">{{ asset.name }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">下载安装并填充路径</button>
+      </form>
     </section>
 
     <section class="card">

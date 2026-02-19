@@ -5,8 +5,11 @@ import os
 import shutil
 import signal
 import subprocess
+import tarfile
+import tempfile
 import threading
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -20,6 +23,8 @@ SETTINGS_FILE = ROOT / "settings.json"
 SYSTEMD_DIR = Path("/etc/systemd/system")
 SYSTEMD_UNIT_PREFIX = "frp"
 SYSTEMD_ENV_PATH = "PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+FRP_DEFAULT_VERSION = "0.67.0"
+FRP_ARCHES = ("amd64", "arm64")
 
 
 DEFAULT_SETTINGS = {
@@ -208,6 +213,61 @@ def _write_systemd_unit(unit_name: str, content: str) -> Optional[str]:
         if code != 0:
             return err or "systemctl daemon-reload 失败"
     return None
+
+
+def _build_release_assets(version: str) -> list[Dict[str, str]]:
+    assets = []
+    for arch in FRP_ARCHES:
+        name = f"frp_{version}_linux_{arch}.tar.gz"
+        url = f"https://github.com/fatedier/frp/releases/download/v{version}/{name}"
+        assets.append({"name": name, "url": url, "arch": arch, "version": version})
+    return assets
+
+
+def _sanitize_version(raw: str) -> str:
+    cleaned = raw.strip().lstrip("v").strip()
+    if not cleaned:
+        return FRP_DEFAULT_VERSION
+    allowed = set("0123456789.")
+    if any(ch not in allowed for ch in cleaned):
+        return ""
+    if cleaned.count(".") != 2:
+        return ""
+    return cleaned
+
+
+def _download_asset(url: str) -> Path:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz") as tmp:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            while True:
+                chunk = resp.read(1024 * 256)
+                if not chunk:
+                    break
+                tmp.write(chunk)
+        return Path(tmp.name)
+
+
+def _safe_extract_tar(tar: tarfile.TarFile, dest: Path) -> None:
+    dest = dest.resolve()
+    for member in tar.getmembers():
+        target = (dest / member.name).resolve()
+        if dest not in target.parents and target != dest:
+            raise ValueError("检测到不安全的压缩包路径")
+    tar.extractall(dest)
+
+
+def _find_frp_binaries(dest: Path, preferred_root: Optional[Path] = None) -> Tuple[Optional[Path], Optional[Path]]:
+    search_root = preferred_root if preferred_root and preferred_root.exists() else dest
+    frps_path = None
+    frpc_path = None
+    for item in search_root.rglob("*"):
+        if item.is_file() and item.name == "frps":
+            frps_path = item
+        elif item.is_file() and item.name == "frpc":
+            frpc_path = item
+        if frps_path and frpc_path:
+            break
+    return frps_path, frpc_path
 
 
 def safe_dir(path_str: str) -> Optional[Path]:
@@ -641,6 +701,8 @@ def frps_save() -> Any:
 def service_page() -> str:
     settings = load_settings()
     directory = current_dir(settings)
+    version = FRP_DEFAULT_VERSION
+    assets = _build_release_assets(version)
     return render_template(
         "service.html",
         settings=settings,
@@ -648,6 +710,9 @@ def service_page() -> str:
         states=_service_status(),
         files=list_toml_files(directory),
         frps_config_path=_frps_config_path(settings),
+        release_version=version,
+        release_assets=assets,
+        release_error="",
     )
 
 
@@ -952,6 +1017,54 @@ def systemd_frpc_install() -> Any:
         flash(f"生成 systemd 单元失败: {error}", "error")
     else:
         flash(f"已生成 {unit_name}", "success")
+    return redirect(url_for("service_page"))
+
+
+@app.route("/service/frp/install", methods=["POST"])
+def frp_install() -> Any:
+    settings = load_settings()
+    version_raw = request.form.get("version", "").strip()
+    version = _sanitize_version(version_raw) if version_raw else FRP_DEFAULT_VERSION
+    if not version:
+        flash("版本号无效，请使用类似 0.67.0 的格式", "error")
+        return redirect(url_for("service_page"))
+    asset_name = request.form.get("asset_name", "").strip()
+    if not asset_name:
+        flash("请选择要下载的包", "error")
+        return redirect(url_for("service_page"))
+    assets = _build_release_assets(version)
+    selected = next((a for a in assets if a.get("name") == asset_name), None)
+    if not selected or not selected.get("url"):
+        flash("选择的包无效或已过期，请刷新后重试", "error")
+        return redirect(url_for("service_page"))
+
+    dest_dir = current_dir(settings)
+    temp_path: Optional[Path] = None
+    try:
+        temp_path = _download_asset(selected["url"])
+        with tarfile.open(temp_path, "r:gz") as tar:
+            members = tar.getmembers()
+            top_levels = {Path(m.name).parts[0] for m in members if m.name}
+            preferred_root = None
+            if len(top_levels) == 1:
+                preferred_root = dest_dir / next(iter(top_levels))
+            _safe_extract_tar(tar, dest_dir)
+        frps_path, frpc_path = _find_frp_binaries(dest_dir, preferred_root)
+        if not frps_path or not frpc_path:
+            flash("解压完成，但未找到 frps/frpc 可执行文件", "error")
+            return redirect(url_for("service_page"))
+        settings["frps_path"] = str(frps_path)
+        settings["frpc_path"] = str(frpc_path)
+        save_settings(settings)
+        flash("已下载安装并自动填充路径", "success")
+    except Exception as exc:
+        flash(f"安装失败: {exc}", "error")
+    finally:
+        if temp_path and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
     return redirect(url_for("service_page"))
 
 
